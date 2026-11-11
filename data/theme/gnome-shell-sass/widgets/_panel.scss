@@ -22,6 +22,61 @@ $panel_transition_duration: 250ms; // same as the overview transition duration
     box-shadow: inset 0 -0.5px 0 0 $panel_border_color;
   }
 
+  // Let the desktop wallpaper show through the top bar.
+  &.transparent-panel {
+    background-color: transparent;
+    box-shadow: none;
+    border-width: 0;
+    border-color: transparent;
+
+    // Apply the wallpaper foreground only in desktop mode.
+    &.transparent-panel-desktop {
+      &.transparent-panel-on-dark {
+        .panel-button {
+          @include panel_button($fg: $light_1);
+
+          &#panelActivities .workspace-dot {
+            background-color: $light_1;
+          }
+
+          &.clock-display {
+            @include panel_button($fg: $light_1, $highlighted_child: true, $child_class: '.clock');
+          }
+
+          &.screen-recording-indicator {
+            @include panel_button($bg:$recording_indicator_color, $fg:$_base_color_light, $style: filled);
+          }
+
+          &.screen-sharing-indicator {
+            @include panel_button($bg:$privacy_indicator_color, $fg:$_base_color_light, $style: filled);
+          }
+        }
+      }
+
+      &.transparent-panel-on-light {
+        .panel-button {
+          @include panel_button($fg: $_base_color_dark);
+
+          &#panelActivities .workspace-dot {
+            background-color: $_base_color_dark;
+          }
+
+          &.clock-display {
+            @include panel_button($fg: $_base_color_dark, $highlighted_child: true, $child_class: '.clock');
+          }
+
+          &.screen-recording-indicator {
+            @include panel_button($bg:$recording_indicator_color, $fg:$_base_color_light, $style: filled);
+          }
+
+          &.screen-sharing-indicator {
+            @include panel_button($bg:$privacy_indicator_color, $fg:$_base_color_light, $style: filled);
+          }
+        }
+      }
+    }
+  }
+
   // panel menus
   .panel-button {
     @include panel_button();
@@ -100,6 +155,10 @@ $panel_transition_duration: 250ms; // same as the overview transition duration
   &.unlock-screen,
   &.login-screen {
     background-color: transparent;
+
+    &.transparent-panel {
+      background-color: transparent;
+    }
 
     // unfortunate duplication to keep indicator style in these states
     .panel-button {

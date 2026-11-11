@@ -36,6 +36,7 @@ import {ATIndicator} from './status/accessibility.js';
 import {InputSourceIndicator} from './status/keyboard.js';
 import {DwellClickIndicator} from './status/dwellClick.js';
 import {ScreenRecordingIndicator, ScreenSharingIndicator} from './status/remoteAccess.js';
+import {PanelBackdrop} from './panelBackdrop.js';
 
 const BUTTON_DND_ACTIVATION_TIMEOUT = 250;
 
@@ -463,13 +464,30 @@ export class Panel extends St.Widget {
             reactive: true,
         });
 
-        this.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
+        /* Fully transparent chrome — wallpaper shows through; icons only.
+         * Yaru ships `#panel { background-color: #131313 !important }`;
+         * keep defeating it on every style refresh. */
+        const clearPanelChrome = () => {
+            this.set_style('background-color: transparent !important;');
+        };
+        clearPanelChrome();
+        this.connect('style-changed', clearPanelChrome);
+        this.set_offscreen_redirect(0);
 
         this._sessionStyle = null;
 
         this.statusArea = {};
 
         this.menuManager = new PopupMenu.PopupMenuManager(this);
+
+        /* Wallpaper luminance selects the transparent panel's foreground. */
+        this._panelBackdrop = new PanelBackdrop();
+        this.insert_child_at_index(this._panelBackdrop, 0);
+        this.add_style_class_name('transparent-panel');
+        this._panelBackdrop.connectObject(
+            'dark-background-changed',
+            (_obj, dark) => this._updatePanelForeground(dark),
+            this);
 
         this._leftBox = new St.BoxLayout({name: 'panelLeft'});
         this.add_child(this._leftBox);
@@ -487,10 +505,16 @@ export class Panel extends St.Widget {
             'window-drag', Clutter.EventPhase.TARGET, this._clickGesture);
 
         Main.overview.connectObject('showing',
-            () => this.add_style_pseudo_class('overview'),
+            () => {
+                this.add_style_pseudo_class('overview');
+                this._setPanelBackdropActive(false);
+            },
             this);
         Main.overview.connectObject('hiding',
-            () => this.remove_style_pseudo_class('overview'),
+            () => {
+                this.remove_style_pseudo_class('overview');
+                this._setPanelBackdropActive(true);
+            },
             this);
 
         Main.layoutManager.panelBox.add_child(this);
@@ -522,6 +546,13 @@ export class Panel extends St.Widget {
 
         const allocWidth = box.x2 - box.x1;
         const allocHeight = box.y2 - box.y1;
+
+        const backdropBox = new Clutter.ActorBox();
+        backdropBox.x1 = 0;
+        backdropBox.y1 = 0;
+        backdropBox.x2 = allocWidth;
+        backdropBox.y2 = allocHeight;
+        this._panelBackdrop.allocate(backdropBox);
 
         const [, leftNaturalWidth] = this._leftBox.get_preferred_width(-1);
         const [, centerNaturalWidth] = this._centerBox.get_preferred_width(-1);
@@ -593,6 +624,27 @@ export class Panel extends St.Widget {
             sprite,
             event.get_time(),
             coords);
+    }
+
+    _setPanelBackdropActive(active) {
+        const desktopLike = active &&
+            this._sessionStyle !== 'unlock-screen' &&
+            this._sessionStyle !== 'login-screen';
+
+        if (desktopLike)
+            this.add_style_class_name('transparent-panel-desktop');
+        else
+            this.remove_style_class_name('transparent-panel-desktop');
+
+        this._panelBackdrop.setActive(desktopLike);
+    }
+
+    _updatePanelForeground(darkBackground) {
+        // Use light text on dark wallpaper and dark text on light wallpaper.
+        this.remove_style_class_name('transparent-panel-on-dark');
+        this.remove_style_class_name('transparent-panel-on-light');
+        this.add_style_class_name(
+            darkBackground ? 'transparent-panel-on-dark' : 'transparent-panel-on-light');
     }
 
     _toggleMenu(indicator) {
@@ -670,6 +722,8 @@ export class Panel extends St.Widget {
         this._sessionStyle = Main.sessionMode.panelStyle;
         if (this._sessionStyle)
             this.add_style_class_name(this._sessionStyle);
+
+        this._setPanelBackdropActive(!Main.overview.visible);
     }
 
     _hideIndicators() {

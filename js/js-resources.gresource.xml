@@ -93,6 +93,7 @@
     <file>ui/listModes.js</file>
     <file>ui/locatePointer.js</file>
     <file>ui/lookingGlass.js</file>
+    <file>ui/panelBackdrop.js</file>
     <file>ui/magnifier.js</file>
     <file>ui/main.js</file>
     <file>ui/messageList.js</file>
