@@ -10,6 +10,39 @@ All interactions with the project should follow the [Code of Conduct][conduct].
 
 [conduct]: https://conduct.gnome.org/
 
+## Features in this fork
+
+This fork adds desktop appearance and memory-lifetime improvements:
+
+- **Transparent top bar with adaptive foreground.** Text and icons switch
+  between light and dark according to wallpaper luminance. Wallpaper,
+  color-scheme and monitor changes update the selection; overview and lock
+  screen keep their own styling. See [Transparent top bar](doc/transparent-panel.md)
+  for sampling behavior and limitations.
+- **Wallpaper texture lifetime management.** The cache weakly references
+  historical entries, while active backgrounds retain their current image or
+  animation frames. Switching wallpapers can release unused textures after
+  garbage collection, native-reference release and GPU completion.
+- **Shared asynchronous loading.** Concurrent requests for the same wallpaper
+  share a load. Failed requests can be retried, file invalidation cannot let an
+  older request replace a newer entry, and cancelled or superseded backgrounds
+  ignore late results.
+- **Integration with the Vulkan compositor fork.** Vulkan rendering and its
+  allocation retirement are provided by [Ultranix/mutter](https://github.com/Ultranix/mutter).
+  Build against the matching Mutter library ABI.
+
+In an Intel i915, 1920×1080 headless Vulkan test with six wallpaper switches,
+matching overview operations and explicit garbage collection, the rendering
+client's final resident allocation decreased from about **568 MiB to 378 MiB**.
+Process PSS changed from about **225 MiB to 217 MiB**. These are separate memory
+metrics and must not be added together; this test does not predict a full
+session's memory usage or immediate reclamation during normal use. This change
+does not downscale source wallpapers or force global garbage collection.
+
+See [Changelog](CHANGELOG.md) for fork changes. Report fork-specific problems
+at [Ultranix/gnome-shell issues](https://github.com/Ultranix/gnome-shell/issues).
+The following support and contribution sections describe the upstream project.
+
 ## Supported versions
 
 Upstream gnome-shell only supports the most recent stable release series,

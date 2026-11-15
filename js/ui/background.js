@@ -102,6 +102,7 @@ import * as Signals from '../misc/signals.js';
 import * as LoginManager from '../misc/loginManager.js';
 import * as Main from './main.js';
 import * as Params from '../misc/params.js';
+import {WeakTextureCache} from '../misc/weakTextureCache.js';
 
 const DEFAULT_BACKGROUND_COLOR = new Cogl.Color({red: 40, green: 40, blue: 40, alpha: 255});
 
@@ -234,23 +235,20 @@ function getBackgroundCache() {
 
 class BackgroundTextureCache {
     constructor() {
-        this._textures = new Map(); // uri -> {texture, colorState}
+        this._textures = new WeakTextureCache();
     }
 
     async load(file, cancellable) {
         const uri = file.get_uri();
 
-        if (this._textures.has(uri))
-            return this._textures.get(uri);
-
-        // Load image using glycin
-        const [frameData, colorState] = await this._loadGlycinFrame(file, cancellable);
-
-        // Create CoglTexture from glycin frame data
-        const texture = this._createTexture(frameData);
-
-        const entry = {texture, colorState};
-        this._textures.set(uri, entry);
+        cancellable?.set_error_if_cancelled();
+        const entry = await this._textures.load(uri, async () => {
+            // One consumer being destroyed must not cancel another monitor's
+            // shared load. Each consumer checks cancellation before using it.
+            const [frameData, colorState] = await this._loadGlycinFrame(file, null);
+            return {texture: this._createTexture(frameData), colorState};
+        });
+        cancellable?.set_error_if_cancelled();
         return entry;
     }
 
@@ -373,7 +371,7 @@ class BackgroundTextureCache {
     }
 
     purge(file) {
-        this._textures.delete(file.get_uri());
+        this._textures.purge(file.get_uri());
     }
 }
 
@@ -407,6 +405,8 @@ const Background = GObject.registerClass({
         this._layoutManager = params.layoutManager;
         this._fileWatches = {};
         this._cancellable = new Gio.Cancellable();
+        this._textureEntries = [];
+        this._loadSerial = 0;
         this.isLoaded = false;
 
         this._interfaceSettings = new Gio.Settings({schema_id: INTERFACE_SCHEMA});
@@ -437,6 +437,10 @@ const Background = GObject.registerClass({
 
     destroy() {
         this._cancellable.cancel();
+        this._loadSerial++;
+        // MetaBackground keeps its own references until the fading actor is
+        // gone. Only drop the cache entries here, not the displayed textures.
+        this._textureEntries = [];
         this._removeAnimationTimeout();
 
         let i;
@@ -538,12 +542,14 @@ const Background = GObject.registerClass({
 
     async _updateAnimation() {
         this._updateAnimationTimeoutId = 0;
+        const serial = ++this._loadSerial;
 
         this._animation.update(this._layoutManager.monitors[this._monitorIndex]);
         const files = this._animation.keyFrameFiles;
 
         if (files.length === 0) {
-            this.set_file(null, this._style);
+            this.set_texture(null, this._style, null);
+            this._textureEntries = [];
             this._setLoaded();
             this._queueUpdateAnimation();
             return;
@@ -558,6 +564,9 @@ const Background = GObject.registerClass({
                     return cache.load(f, this._cancellable);
                 })
             );
+
+            if (this._cancellable.is_cancelled() || serial !== this._loadSerial)
+                return;
 
             const textures = entries.map(e => e.texture);
             const colorState = entries[0]?.colorState || null;
@@ -574,9 +583,13 @@ const Background = GObject.registerClass({
                 this.set_texture(textures[0], this._style, colorState);
             }
 
+            this._textureEntries = entries;
+
             this._setLoaded();
             this._queueUpdateAnimation();
         } catch (err) {
+            if (this._cancellable.is_cancelled() || serial !== this._loadSerial)
+                return;
             if (!err.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 logError(err, 'Failed to load animation');
             this._setLoaded();
@@ -632,14 +645,21 @@ const Background = GObject.registerClass({
 
     async _loadImage(file) {
         this._watchFile(file);
+        const serial = ++this._loadSerial;
 
         const cache = getBackgroundTextureCache();
 
         try {
-            const {texture, colorState} = await cache.load(file, this._cancellable);
+            const entry = await cache.load(file, this._cancellable);
+            if (this._cancellable.is_cancelled() || serial !== this._loadSerial)
+                return;
+            const {texture, colorState} = entry;
             this.set_texture(texture, this._style, colorState);
+            this._textureEntries = [entry];
             this._setLoaded();
         } catch (err) {
+            if (this._cancellable.is_cancelled() || serial !== this._loadSerial)
+                return;
             if (!err.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 logError(err, 'Failed to load background');
             this._setLoaded();
